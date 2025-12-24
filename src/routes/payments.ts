@@ -1,95 +1,110 @@
-import { Router } from 'express';
-import prisma from '../lib/prisma';
+import { Router, Request, Response } from 'express'
+import prisma from '../lib/prisma'
 
-const router = Router();
+const router = Router()
 
 /**
  * GET /api/payments
- * Obtiene todos los pagos con su inscripción, alumno y carrera
+ * Obtiene todos los pagos (opcional: por enrollmentId)
  */
-router.get('/', async (req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
+    const { enrollmentId } = req.query
+
     const payments = await prisma.payment.findMany({
+      where: enrollmentId
+        ? { enrollmentId: Number(enrollmentId) }
+        : undefined,
       orderBy: {
-        dueDate: 'asc',
+        dueDate: 'asc'
       },
       include: {
         enrollment: {
           include: {
             student: true,
-            career: true,
-          },
-        },
-      },
-    });
+            career: true
+          }
+        }
+      }
+    })
 
-    res.json(payments);
+    res.json(payments)
   } catch (error) {
-    console.error('Error al obtener pagos:', error);
-    res.status(500).json({ message: 'Error al obtener pagos' });
+    console.error('Error al obtener pagos:', error)
+    res.status(500).json({ message: 'Error al obtener pagos' })
   }
-});
+})
 
 /**
  * GET /api/payments/overdue
  * Obtiene pagos vencidos y no pagados
  */
-router.get('/overdue', async (req, res) => {
+router.get('/overdue', async (_req: Request, res: Response) => {
   try {
-    const today = new Date();
+    const today = new Date()
 
     const overduePayments = await prisma.payment.findMany({
       where: {
         paid: false,
-        dueDate: {
-          lt: today,
-        },
+        dueDate: { lt: today }
       },
       orderBy: {
-        dueDate: 'asc',
+        dueDate: 'asc'
       },
       include: {
         enrollment: {
           include: {
             student: true,
-            career: true,
-          },
-        },
-      },
-    });
+            career: true
+          }
+        }
+      }
+    })
 
-    res.json(overduePayments);
+    res.json(overduePayments)
   } catch (error) {
-    console.error('Error al obtener pagos vencidos:', error);
-    res.status(500).json({ message: 'Error al obtener pagos vencidos' });
+    console.error('Error al obtener pagos vencidos:', error)
+    res.status(500).json({ message: 'Error al obtener pagos vencidos' })
   }
-});
+})
 
 /**
  * PATCH /api/payments/:id/pay
  * Marca un pago como pagado
  */
-router.patch('/:id/pay', async (req, res) => {
+router.patch('/:id/pay', async (req: Request, res: Response) => {
   try {
-    const paymentId = Number(req.params.id);
+    const paymentId = Number(req.params.id)
 
     if (isNaN(paymentId)) {
-      return res.status(400).json({ message: 'ID de pago inválido' });
+      return res.status(400).json({ message: 'ID de pago inválido' })
     }
 
-    const payment = await prisma.payment.update({
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId }
+    })
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Pago no encontrado' })
+    }
+
+    if (payment.paid) {
+      return res.status(400).json({ message: 'El pago ya fue realizado' })
+    }
+
+    const updatedPayment = await prisma.payment.update({
       where: { id: paymentId },
       data: {
         paid: true,
-        paidAt: new Date(),
-      },
-    });
+        paidAt: new Date()
+      }
+    })
 
-    res.json(payment);
+    res.json(updatedPayment)
   } catch (error) {
-    console.error('Error al marcar pago como pagado:', error);
-    res.status(500).json({ message: 'Error al actualizar el pago' });
+    console.error('Error al marcar pago como pagado:', error)
+    res.status(500).json({ message: 'Error al actualizar el pago' })
   }
-});
+})
 
-export default router;
+export default router
