@@ -1,60 +1,148 @@
-import { Router } from 'express'
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
+import { Router, Request, Response } from 'express'
+import { PrismaClient, PlanType } from '@prisma/client'
+
 const router = Router()
+const prisma = new PrismaClient()
 
-// Crear inscripción -> genera esquema de pagos automático
-router.post('/', async (req, res) => {
-  const { studentId, careerId, startDate } = req.body
-  const career = await prisma.career.findUnique({ where: { id: Number(careerId) } })
-  if (!career) return res.status(400).json({ error: 'career not found' })
+// ===================================================
+// POST /enrollments
+// Crear inscripción + generar pagos automáticamente
+// ===================================================
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const { studentId, careerId, startDate } = req.body
 
-  const sDate = new Date(startDate)
-  // Calcular endDate sumando durationMonths
-  const endDate = new Date(sDate)
-  endDate.setMonth(endDate.getMonth() + career.durationMonths)
+    if (!studentId || !careerId || !startDate) {
+      return res.status(400).json({ error: 'Missing required fields' })
+    }
 
-  const enrollment = await prisma.enrollment.create({
-    data: { studentId: Number(studentId), careerId: Number(careerId), startDate: sDate, endDate }
-  })
+    // 1️⃣ Validar carrera
+    const career = await prisma.career.findUnique({
+      where: { id: Number(careerId) }
+    })
 
-  // Generar pagos dependiendo del planType
-  const payments = generatePaymentSchedule(enrollment.id, sDate, career)
-  for (const p of payments) {
-    await prisma.payment.create({ data: p })
+    if (!career) {
+      return res.status(400).json({ error: 'Career not found' })
+    }
+
+    // 2️⃣ Calcular fechas
+    const sDate = new Date(startDate)
+    const endDate = new Date(sDate)
+    endDate.setMonth(endDate.getMonth() + career.durationMonths)
+
+    // 3️⃣ Crear inscripción
+    const enrollment = await prisma.enrollment.create({
+      data: {
+        studentId: Number(studentId),
+        careerId: Number(careerId),
+        startDate: sDate,
+        endDate
+      }
+    })
+
+    // 4️⃣ Generar pagos
+    const payments = generatePaymentSchedule(
+      enrollment.id,
+      sDate,
+      career.planType,
+      career.durationMonths,
+      career.periodicPayment
+    )
+
+    await prisma.payment.createMany({
+      data: payments
+    })
+
+    // 5️⃣ Respuesta completa
+    const result = await prisma.enrollment.findUnique({
+      where: { id: enrollment.id },
+      include: {
+        student: true,
+        career: true,
+        payments: true
+      }
+    })
+
+    res.status(201).json(result)
+
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Error creating enrollment' })
   }
-
-  const full = await prisma.enrollment.findUnique({ where: { id: enrollment.id }, include: { payments: true } })
-  res.json(full)
 })
 
-function generatePaymentSchedule(enrollmentId: number, startDate: Date, career: any) {
-  const payments = []
-  const plan = career.planType
-  let numPayments = 0
+// ===================================================
+// GET /enrollments
+// Listar inscripciones
+// ===================================================
+router.get('/', async (_req: Request, res: Response) => {
+  try {
+    const enrollments = await prisma.enrollment.findMany({
+      include: {
+        student: true,
+        career: true,
+        payments: true
+      }
+    })
+
+    res.json(enrollments)
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching enrollments' })
+  }
+})
+
+// ===================================================
+// Generador de pagos (LÓGICA CLARA Y AISLADA)
+// ===================================================
+function generatePaymentSchedule(
+  enrollmentId: number,
+  startDate: Date,
+  planType: PlanType,
+  durationMonths: number,
+  periodicPayment: number
+) {
+  const payments: {
+    enrollmentId: number
+    dueDate: Date
+    amount: number
+    paid: boolean
+  }[] = []
+
+  let numberOfPayments = 0
   let intervalDays = 30
 
-  if (plan === 'cuatrimestral') {
-    numPayments = Math.ceil(career.durationMonths / 4)
-    intervalDays = 30 * 4
-  } else if (plan === 'semestral') {
-    numPayments = Math.ceil(career.durationMonths / 6)
-    intervalDays = 30 * 6
-  } else if (plan === 'semanal') {
-    numPayments = Math.ceil((career.durationMonths * 30) / 7)
-    intervalDays = 7
-  } else { // mensual
-    numPayments = career.durationMonths
-    intervalDays = 30
+  switch (planType) {
+    case 'SEMANAL':
+      numberOfPayments = Math.ceil((durationMonths * 30) / 7)
+      intervalDays = 7
+      break
+
+    case 'MENSUAL':
+      numberOfPayments = durationMonths
+      intervalDays = 30
+      break
+
+    case 'CUATRIMESTRAL':
+      numberOfPayments = Math.ceil(durationMonths / 4)
+      intervalDays = 120
+      break
+
+    case 'SEMESTRAL':
+      numberOfPayments = Math.ceil(durationMonths / 6)
+      intervalDays = 180
+      break
   }
 
-  // División simple: costTitle / numPayments as extra, plus periodicPayment for recurring
-  const baseAmount = career.periodicPayment
+  for (let i = 0; i < numberOfPayments; i++) {
+    const dueDate = new Date(startDate)
+    dueDate.setDate(dueDate.getDate() + intervalDays * i)
 
-  for (let i = 0; i < numPayments; i++) {
-    const due = new Date(startDate)
-    due.setDate(due.getDate() + intervalDays * i)
-    payments.push({ enrollmentId, dueDate: due, amount: baseAmount })
+    payments.push({
+      enrollmentId,
+      dueDate,
+      amount: periodicPayment,
+      paid: false
+    })
   }
 
   return payments
