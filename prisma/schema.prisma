@@ -1,0 +1,62 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+}
+
+model Career {
+  id             Int      @id @default(autoincrement())
+  name           String
+  durationMonths Int
+  planType       String   // 'cuatrimestral', 'semestral', 'mensual', 'semanal'
+  inscription    Int
+  periodicPayment Int
+  costTitle      Int
+  durationText   String?
+  enrollments    Enrollment[]
+}
+
+model Student {
+  id           Int      @id @default(autoincrement())
+  firstName    String
+  lastName     String
+  email        String?  @unique
+  phone        String?
+  createdAt    DateTime @default(now())
+  enrollments  Enrollment[]
+}
+
+model Enrollment {
+  id           Int      @id @default(autoincrement())
+  student      Student  @relation(fields: [studentId], references: [id])
+  studentId    Int
+  career       Career   @relation(fields: [careerId], references: [id])
+  careerId     Int
+  startDate    DateTime
+  endDate      DateTime
+  status       String   @default("active")
+  payments     Payment[]
+}
+
+model Payment {
+  id           Int      @id @default(autoincrement())
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id])
+  enrollmentId Int
+  dueDate      DateTime
+  amount       Int
+  paid         Boolean  @default(false)
+  paidAt       DateTime?
+  createdAt    DateTime @default(now())
+}

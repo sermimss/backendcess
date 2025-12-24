@@ -1,0 +1,21 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.app = void 0;
+const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
+const body_parser_1 = __importDefault(require("body-parser"));
+const students_1 = __importDefault(require("./routes/students"));
+const careers_1 = __importDefault(require("./routes/careers"));
+const enrollments_1 = __importDefault(require("./routes/enrollments"));
+const payments_1 = __importDefault(require("./routes/payments"));
+exports.app = (0, express_1.default)();
+exports.app.use((0, cors_1.default)());
+exports.app.use(body_parser_1.default.json());
+exports.app.use('/api/students', students_1.default);
+exports.app.use('/api/careers', careers_1.default);
+exports.app.use('/api/enrollments', enrollments_1.default);
+exports.app.use('/api/payments', payments_1.default);
+exports.app.get('/', (req, res) => res.json({ ok: true }));
