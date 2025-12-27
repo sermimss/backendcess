@@ -8,22 +8,26 @@ const prisma_1 = __importDefault(require("../lib/prisma"));
 const router = (0, express_1.Router)();
 /**
  * GET /api/payments
- * Obtiene todos los pagos con su inscripción, alumno y carrera
+ * Obtiene todos los pagos (opcional: por enrollmentId)
  */
 router.get('/', async (req, res) => {
     try {
+        const { enrollmentId } = req.query;
         const payments = await prisma_1.default.payment.findMany({
+            where: enrollmentId
+                ? { enrollmentId: Number(enrollmentId) }
+                : undefined,
             orderBy: {
-                dueDate: 'asc',
+                dueDate: 'asc'
             },
             include: {
                 enrollment: {
                     include: {
                         student: true,
-                        career: true,
-                    },
-                },
-            },
+                        career: true
+                    }
+                }
+            }
         });
         res.json(payments);
     }
@@ -36,27 +40,25 @@ router.get('/', async (req, res) => {
  * GET /api/payments/overdue
  * Obtiene pagos vencidos y no pagados
  */
-router.get('/overdue', async (req, res) => {
+router.get('/overdue', async (_req, res) => {
     try {
         const today = new Date();
         const overduePayments = await prisma_1.default.payment.findMany({
             where: {
                 paid: false,
-                dueDate: {
-                    lt: today,
-                },
+                dueDate: { lt: today }
             },
             orderBy: {
-                dueDate: 'asc',
+                dueDate: 'asc'
             },
             include: {
                 enrollment: {
                     include: {
                         student: true,
-                        career: true,
-                    },
-                },
-            },
+                        career: true
+                    }
+                }
+            }
         });
         res.json(overduePayments);
     }
@@ -75,14 +77,23 @@ router.patch('/:id/pay', async (req, res) => {
         if (isNaN(paymentId)) {
             return res.status(400).json({ message: 'ID de pago inválido' });
         }
-        const payment = await prisma_1.default.payment.update({
+        const payment = await prisma_1.default.payment.findUnique({
+            where: { id: paymentId }
+        });
+        if (!payment) {
+            return res.status(404).json({ message: 'Pago no encontrado' });
+        }
+        if (payment.paid) {
+            return res.status(400).json({ message: 'El pago ya fue realizado' });
+        }
+        const updatedPayment = await prisma_1.default.payment.update({
             where: { id: paymentId },
             data: {
                 paid: true,
-                paidAt: new Date(),
-            },
+                paidAt: new Date()
+            }
         });
-        res.json(payment);
+        res.json(updatedPayment);
     }
     catch (error) {
         console.error('Error al marcar pago como pagado:', error);

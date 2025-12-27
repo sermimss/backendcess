@@ -1,0 +1,304 @@
+{
+    "info": {
+        "name": "Backendcess API - Full Flow Tests",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_postman_id": "backendcess-full-flow"
+    },
+    "item": [
+        {
+            "name": "Create Student",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\",\n  \"email\": \"test+{{ts}}@example.com\",\n  \"phone\": \"+1234567890\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:4000/api/students",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "students"
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "prerequest",
+                    "script": {
+                        "exec": [
+                            "// Generar timestamp para email único",
+                            "pm.environment.set('ts', Date.now());"
+                        ]
+                    }
+                },
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+                            "var data = pm.response.json();",
+                            "pm.environment.set('studentId', data.id);",
+                            "pm.environment.set('studentEmail', data.email);",
+                            "pm.environment.set('studentFirstName', data.firstName);",
+                            "pm.environment.set('studentLastName', data.lastName);",
+                            "pm.environment.set('studentPhone', data.phone);",
+                            "pm.expect(data.email).to.include('@');"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Careers",
+            "request": {
+                "method": "GET",
+                "url": {
+                    "raw": "http://localhost:4000/api/careers",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "careers"
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                            "var cs = pm.response.json();",
+                            "if (Array.isArray(cs) && cs.length > 0) { pm.environment.set('careerId', cs[0].id); pm.test('Got career id', function () { pm.expect(cs[0]).to.have.property('id'); }); } else { pm.test('No careers found', function () { pm.expect(cs.length).to.be.above(0); }); }"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Create Enrollment",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"student\": {\n    \"firstName\": \"{{studentFirstName}}\",\n    \"lastName\": \"{{studentLastName}}\",\n    \"email\": \"{{studentEmail}}\",\n    \"phone\": \"{{studentPhone}}\"\n  },\n  \"careerId\": {{careerId}},\n  \"startDate\": \"2025-12-27\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:4000/api/enrollments",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "enrollments"
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                            "var e = pm.response.json();",
+                            "pm.environment.set('enrollmentId', e.id);",
+                            "pm.test('Enrollment has payments', function () { pm.expect(e).to.have.property('payments'); });"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Enrollments",
+            "request": {
+                "method": "GET",
+                "url": {
+                    "raw": "http://localhost:4000/api/enrollments",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "enrollments"
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                            "var list = pm.response.json();",
+                            "pm.test('Enrollment present', function () { pm.expect(list.some(function(x){return x.id == pm.environment.get('enrollmentId');})).to.be.true; });"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Payments for Enrollment",
+            "request": {
+                "method": "GET",
+                "url": {
+                    "raw": "http://localhost:4000/api/payments?enrollmentId={{enrollmentId}}",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "payments"
+                    ],
+                    "query": [
+                        {
+                            "key": "enrollmentId",
+                            "value": "{{enrollmentId}}"
+                        }
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                            "var ps = pm.response.json();",
+                            "pm.test('Has payments', function () { pm.expect(ps.length).to.be.above(0); });",
+                            "pm.environment.set('paymentId', ps[0].id);"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Overdue Payments",
+            "request": {
+                "method": "GET",
+                "url": {
+                    "raw": "http://localhost:4000/api/payments/overdue",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "payments",
+                        "overdue"
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Pay Payment",
+            "request": {
+                "method": "PATCH",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": {
+                    "raw": "http://localhost:4000/api/payments/{{paymentId}}/pay",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "payments",
+                        "{{paymentId}}",
+                        "pay"
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                            "var p = pm.response.json();",
+                            "pm.test('Payment marked paid', function () { pm.expect(p.paid).to.be.true; });"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Verify Payments After Pay",
+            "request": {
+                "method": "GET",
+                "url": {
+                    "raw": "http://localhost:4000/api/payments?enrollmentId={{enrollmentId}}",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "4000",
+                    "path": [
+                        "api",
+                        "payments"
+                    ],
+                    "query": [
+                        {
+                            "key": "enrollmentId",
+                            "value": "{{enrollmentId}}"
+                        }
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                            "var all = pm.response.json();",
+                            "pm.test('Paid updated', function () { pm.expect(all.some(function(x){return x.id == pm.environment.get('paymentId') && x.paid == true;})).to.be.true; });"
+                        ]
+                    }
+                }
+            ]
+        }
+    ]
+}

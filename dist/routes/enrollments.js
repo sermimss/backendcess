@@ -1,57 +1,142 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const client_1 = require("@prisma/client");
-const prisma = new client_1.PrismaClient();
+const prisma_1 = __importDefault(require("../lib/prisma"));
 const router = (0, express_1.Router)();
-// Crear inscripción -> genera esquema de pagos automático
+// ===================================================
+// POST /enrollments
+// Crear inscripción + generar pagos automáticamente
+// ===================================================
 router.post('/', async (req, res) => {
-    const { studentId, careerId, startDate } = req.body;
-    const career = await prisma.career.findUnique({ where: { id: Number(careerId) } });
-    if (!career)
-        return res.status(400).json({ error: 'career not found' });
-    const sDate = new Date(startDate);
-    // Calcular endDate sumando durationMonths
-    const endDate = new Date(sDate);
-    endDate.setMonth(endDate.getMonth() + career.durationMonths);
-    const enrollment = await prisma.enrollment.create({
-        data: { studentId: Number(studentId), careerId: Number(careerId), startDate: sDate, endDate }
-    });
-    // Generar pagos dependiendo del planType
-    const payments = generatePaymentSchedule(enrollment.id, sDate, career);
-    for (const p of payments) {
-        await prisma.payment.create({ data: p });
+    try {
+        const { student, careerId, startDate } = req.body;
+        if (!student ||
+            !student.firstName ||
+            !student.lastName ||
+            !careerId ||
+            !startDate) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+        // 1️⃣ Buscar o crear alumno
+        let newStudent = await prisma_1.default.student.findUnique({
+            where: { email: student.email }
+        });
+        if (!newStudent) {
+            newStudent = await prisma_1.default.student.create({
+                data: {
+                    firstName: student.firstName,
+                    lastName: student.lastName,
+                    email: student.email,
+                    phone: student.phone
+                }
+            });
+        }
+        // 2️⃣ Obtener carrera
+        const career = await prisma_1.default.career.findUnique({
+            where: { id: Number(careerId) }
+        });
+        if (!career) {
+            return res.status(404).json({ error: 'Career not found' });
+        }
+        // 3️⃣ Validar y calcular fechas
+        const sDate = new Date(startDate);
+        if (isNaN(sDate.getTime()))
+            return res.status(400).json({ error: 'Invalid startDate' });
+        // validación durationMonths y periodicPayment...
+        const endDate = new Date(sDate);
+        endDate.setMonth(endDate.getMonth() + career.durationMonths);
+        // 4️⃣ Crear inscripción
+        const enrollment = await prisma_1.default.enrollment.create({
+            data: {
+                studentId: newStudent.id,
+                careerId: career.id,
+                startDate: sDate,
+                endDate
+            }
+        });
+        // 5️⃣ Generar pagos (usar plan de la carrera y crear pagos en transacción)
+        const payments = generatePaymentSchedule(enrollment.id, sDate, career.planType, career.durationMonths, career.periodicPayment);
+        if (payments.length > 0) {
+            await prisma_1.default.$transaction(payments.map(p => prisma_1.default.payment.create({ data: p })));
+        }
+        // 6️⃣ Respuesta completa
+        const fullEnrollment = await prisma_1.default.enrollment.findUnique({
+            where: { id: enrollment.id },
+            include: {
+                student: true,
+                career: true,
+                payments: true
+            }
+        });
+        res.status(201).json(fullEnrollment);
     }
-    const full = await prisma.enrollment.findUnique({ where: { id: enrollment.id }, include: { payments: true } });
-    res.json(full);
+    catch (error) {
+        console.error('Error creating enrollment:', error);
+        res.status(500).json({ error: 'Error creating enrollment' });
+    }
 });
-function generatePaymentSchedule(enrollmentId, startDate, career) {
+// ===================================================
+// GET /enrollments
+// Listar inscripciones
+// ===================================================
+router.get('/', async (_req, res) => {
+    try {
+        const enrollments = await prisma_1.default.enrollment.findMany({
+            include: {
+                student: true,
+                career: true,
+                payments: true
+            }
+        });
+        res.json(enrollments);
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Error fetching enrollments' });
+    }
+});
+// ===================================================
+// Generador de pagos (LÓGICA CLARA Y AISLADA)
+// ===================================================
+function generatePaymentSchedule(enrollmentId, startDate, planType, durationMonths, periodicPayment) {
     const payments = [];
-    const plan = career.planType;
-    let numPayments = 0;
-    let intervalDays = 30;
-    if (plan === 'cuatrimestral') {
-        numPayments = Math.ceil(career.durationMonths / 4);
-        intervalDays = 30 * 4;
+    let numberOfPayments = 0;
+    let intervalDays = null;
+    let intervalMonths = null;
+    switch (planType) {
+        case 'SEMANAL':
+            numberOfPayments = Math.ceil((durationMonths * 30) / 7);
+            intervalDays = 7;
+            break;
+        case 'MENSUAL':
+            numberOfPayments = durationMonths;
+            intervalMonths = 1;
+            break;
+        case 'CUATRIMESTRAL':
+            numberOfPayments = Math.ceil(durationMonths / 4);
+            intervalMonths = 4;
+            break;
+        case 'SEMESTRAL':
+            numberOfPayments = Math.ceil(durationMonths / 6);
+            intervalMonths = 6;
+            break;
     }
-    else if (plan === 'semestral') {
-        numPayments = Math.ceil(career.durationMonths / 6);
-        intervalDays = 30 * 6;
-    }
-    else if (plan === 'semanal') {
-        numPayments = Math.ceil((career.durationMonths * 30) / 7);
-        intervalDays = 7;
-    }
-    else { // mensual
-        numPayments = career.durationMonths;
-        intervalDays = 30;
-    }
-    // División simple: costTitle / numPayments as extra, plus periodicPayment for recurring
-    const baseAmount = career.periodicPayment;
-    for (let i = 0; i < numPayments; i++) {
-        const due = new Date(startDate);
-        due.setDate(due.getDate() + intervalDays * i);
-        payments.push({ enrollmentId, dueDate: due, amount: baseAmount });
+    for (let i = 0; i < numberOfPayments; i++) {
+        const dueDate = new Date(startDate);
+        if (intervalMonths !== null) {
+            dueDate.setMonth(dueDate.getMonth() + intervalMonths * i);
+        }
+        else {
+            dueDate.setDate(dueDate.getDate() + intervalDays * i);
+        }
+        payments.push({
+            enrollmentId,
+            dueDate,
+            amount: periodicPayment,
+            paid: false
+        });
     }
     return payments;
 }

@@ -1,3 +1,6 @@
+-- CreateEnum
+CREATE TYPE "PlanType" AS ENUM ('MENSUAL', 'SEMANAL', 'CUATRIMESTRAL', 'SEMESTRAL');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" SERIAL NOT NULL,
@@ -14,7 +17,7 @@ CREATE TABLE "Career" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
     "durationMonths" INTEGER NOT NULL,
-    "planType" TEXT NOT NULL,
+    "planType" "PlanType" NOT NULL,
     "inscription" INTEGER NOT NULL,
     "periodicPayment" INTEGER NOT NULL,
     "costTitle" INTEGER NOT NULL,

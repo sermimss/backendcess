@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express'
-import { PrismaClient, PlanType } from '@prisma/client'
+import { PlanType } from '@prisma/client'
+import prisma from '../lib/prisma'
 
 const router = Router()
-const prisma = new PrismaClient()
 
 // ===================================================
 // POST /enrollments
@@ -10,51 +10,70 @@ const prisma = new PrismaClient()
 // ===================================================
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { studentId, careerId, startDate } = req.body
 
-    if (!studentId || !careerId || !startDate) {
+    const { student, careerId, startDate } = req.body
+
+    if (
+      !student ||
+      !student.firstName ||
+      !student.lastName ||
+      !careerId ||
+      !startDate
+    ) {
       return res.status(400).json({ error: 'Missing required fields' })
     }
 
-    // 1️⃣ Validar carrera
+    // 1️⃣ Buscar o crear alumno
+    let newStudent = await prisma.student.findUnique({
+      where: { email: student.email }
+    })
+
+    if (!newStudent) {
+      newStudent = await prisma.student.create({
+        data: {
+          firstName: student.firstName,
+          lastName: student.lastName,
+          email: student.email,
+          phone: student.phone
+        }
+      })
+    }
+
+    // 2️⃣ Obtener carrera
     const career = await prisma.career.findUnique({
       where: { id: Number(careerId) }
     })
 
     if (!career) {
-      return res.status(400).json({ error: 'Career not found' })
+      return res.status(404).json({ error: 'Career not found' })
     }
 
-    // 2️⃣ Calcular fechas
+    // 3️⃣ Validar y calcular fechas
     const sDate = new Date(startDate)
+    if (isNaN(sDate.getTime())) return res.status(400).json({ error: 'Invalid startDate' })
+    // validación durationMonths y periodicPayment...
     const endDate = new Date(sDate)
     endDate.setMonth(endDate.getMonth() + career.durationMonths)
 
-    // 3️⃣ Crear inscripción
+    // 4️⃣ Crear inscripción
     const enrollment = await prisma.enrollment.create({
       data: {
-        studentId: Number(studentId),
-        careerId: Number(careerId),
+        studentId: newStudent.id,
+        careerId: career.id,
         startDate: sDate,
         endDate
       }
     })
 
-    // 4️⃣ Generar pagos
-    const payments = generatePaymentSchedule(
-      enrollment.id,
-      sDate,
-      career.planType,
-      career.durationMonths,
-      career.periodicPayment
-    )
+    // 5️⃣ Generar pagos (usar plan de la carrera y crear pagos en transacción)
+    const payments = generatePaymentSchedule(enrollment.id, sDate, career.planType, career.durationMonths, career.periodicPayment)
 
-    await prisma.payment.createMany({
-      data: payments
-    })
+    if (payments.length > 0) {
+      await prisma.$transaction(payments.map(p => prisma.payment.create({ data: p })))
+    }
 
-    // 5️⃣ Respuesta completa
-    const result = await prisma.enrollment.findUnique({
+    // 6️⃣ Respuesta completa
+    const fullEnrollment = await prisma.enrollment.findUnique({
       where: { id: enrollment.id },
       include: {
         student: true,
@@ -63,13 +82,13 @@ router.post('/', async (req: Request, res: Response) => {
       }
     })
 
-    res.status(201).json(result)
-
-  } catch (error) {
-    console.error(error)
+    res.status(201).json(fullEnrollment)
+  } catch (error: any) {
+    console.error('Error creating enrollment:', error)
     res.status(500).json({ error: 'Error creating enrollment' })
   }
 })
+
 
 // ===================================================
 // GET /enrollments
@@ -109,7 +128,8 @@ function generatePaymentSchedule(
   }[] = []
 
   let numberOfPayments = 0
-  let intervalDays = 30
+  let intervalDays: number | null = null
+  let intervalMonths: number | null = null
 
   switch (planType) {
     case 'SEMANAL':
@@ -119,23 +139,27 @@ function generatePaymentSchedule(
 
     case 'MENSUAL':
       numberOfPayments = durationMonths
-      intervalDays = 30
+      intervalMonths = 1
       break
 
     case 'CUATRIMESTRAL':
       numberOfPayments = Math.ceil(durationMonths / 4)
-      intervalDays = 120
+      intervalMonths = 4
       break
 
     case 'SEMESTRAL':
       numberOfPayments = Math.ceil(durationMonths / 6)
-      intervalDays = 180
+      intervalMonths = 6
       break
   }
 
   for (let i = 0; i < numberOfPayments; i++) {
     const dueDate = new Date(startDate)
-    dueDate.setDate(dueDate.getDate() + intervalDays * i)
+    if (intervalMonths !== null) {
+      dueDate.setMonth(dueDate.getMonth() + intervalMonths * i)
+    } else {
+      dueDate.setDate(dueDate.getDate() + (intervalDays as number) * i)
+    }
 
     payments.push({
       enrollmentId,
